@@ -1,5 +1,7 @@
+#include <Arduino_FreeRTOS.h>
 #include <Servo.h>
-#define SENSORPIN 3 
+
+#define SENSORPIN 3
 
 Servo eye1_X; //left vertical
 Servo eye1_Y; //left horizontal
@@ -9,18 +11,7 @@ Servo eye2_Y; //right horizontal
 const int centerPos = 90;
 const int radius = 40; //50 absouloute HARD max
 
-bool pirEnabled = true;
-
-void setup() {
-  eye1_X.attach(6); //white wire
-  eye1_Y.attach(4); //blue wire
-  eye2_X.attach(7); //green wire
-  eye2_Y.attach(5); //orange wire
-
-  pinMode(SENSORPIN, INPUT);
-
-  resetToCenter();
-}
+TaskHandle_t eyeTaskHandle = NULL;
 
 void resetToCenter() {
   eye1_X.write(centerPos);
@@ -36,16 +27,17 @@ void dartTo(int xOffset, int yOffset) {
   eye2_Y.write(centerPos - yOffset);
 }
 
-void jitterMove(){
-  for (int x = -radius; x <= radius; x+= 2){
-    int jitterY = random(-5,6); //random but small jitter
+void jitterMove() {
+  for (int x = -radius; x <= radius; x += 2) {
+    int jitterY = random(-5, 6); //random but small jitter
+
     eye1_X.write(centerPos + x);
     eye2_X.write(centerPos + x);
 
     eye1_Y.write(centerPos + jitterY);
     eye2_Y.write(centerPos + jitterY);
 
-    delay(random(20, 60)); //uneven timing 
+    vTaskDelay(pdMS_TO_TICKS(random(20, 60))); //uneven timing
   }
 }
 
@@ -66,44 +58,48 @@ void Circles() {
     eye2_Y.write(y2);
 
     angle += 0.18;  // increase for more speed
-    delay(20);
+    vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
 
 void performEyeRoutine() {
 
   resetToCenter();
-  delay(200);
+  vTaskDelay(pdMS_TO_TICKS(200));
 
   //dart left
   dartTo(-radius, 0);
-  delay(150);
+  vTaskDelay(pdMS_TO_TICKS(150));
 
-  //slow move 
+  //slow move
   jitterMove();
 
   //dart back to center
   resetToCenter();
-  delay(500);
+  vTaskDelay(pdMS_TO_TICKS(500));
 
   //dart around like
   dartTo(-radius, 0);
-  delay(500);
-  dartTo(radius, 0);
-  delay(500);
-  resetToCenter();
-  delay(500);
-  dartTo(0, -radius);
-  delay(500);
-  dartTo(0, radius);
-  delay(500);
-  
-  delay(500);
-  resetToCenter();
+  vTaskDelay(pdMS_TO_TICKS(500));
 
+  dartTo(radius, 0);
+  vTaskDelay(pdMS_TO_TICKS(500));
+
+  resetToCenter();
+  vTaskDelay(pdMS_TO_TICKS(500));
+
+  dartTo(0, -radius);
+  vTaskDelay(pdMS_TO_TICKS(500));
+
+  dartTo(0, radius);
+  vTaskDelay(pdMS_TO_TICKS(500));
+
+  vTaskDelay(pdMS_TO_TICKS(500));
+
+  resetToCenter();
 
   //pause
-  delay(1000);
+  vTaskDelay(pdMS_TO_TICKS(1000));
 
   //circles
   Circles();
@@ -112,17 +108,62 @@ void performEyeRoutine() {
   resetToCenter();
 }
 
-void loop() {
-  int pirSensor = digitalRead(SENSORPIN);
+void PIRTask(void *pvParameters) {
+  bool triggered = false;
 
-  if (pirSensor == HIGH && pirEnabled) {
-    pirEnabled = false;
+  while (1) {
+    int pirSensor = digitalRead(SENSORPIN);
+
+    if (pirSensor == HIGH) {
+      if (!triggered) {
+        triggered = true;
+        xTaskNotifyGive(eyeTaskHandle);
+      }
+    } else {
+      triggered = false;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
+void EyeTask(void *pvParameters) {
+  while (1) {
+
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
     performEyeRoutine();
 
-    delay(1500);
-    pirEnabled = true;
-
-  delay(50);
+    vTaskDelay(pdMS_TO_TICKS(1500));
   }
+}
+
+void setup() {
+  eye1_X.attach(6); //white wire
+  eye1_Y.attach(4); //blue wire
+  eye2_X.attach(7); //green wire
+  eye2_Y.attach(5); //orange wire
+
+  pinMode(SENSORPIN, INPUT);
+
+  resetToCenter();
+
+  xTaskCreate(
+    PIRTask,
+    "PIR",
+    128,
+    NULL,
+    2,
+    NULL);
+
+  xTaskCreate(
+    EyeTask,
+    "Eyes",
+    256,
+    NULL,
+    1,
+    &eyeTaskHandle);
+}
+
+void loop() {
 }
